@@ -1,0 +1,18 @@
+tenant: bess-example
+feeds:
+  - key: bess-daily
+    queries:
+      - magazyn energii
+      - bateryjny magazyn energii
+    interval_hours: 24
+    lookback_days: 14
+    min_capacity_kwh: 100
+  - key: bess-acronym
+    queries: [BESS]
+    interval_hours: 48
+    lookback_days: 7
+verified_domains: []
+# Add entries after verifying the NIP against an authoritative public source.
+#   - nip: "1234563218"
+#     domain: przyklad.example
+#     evidence_url: https://przyklad.example/o-firmie
