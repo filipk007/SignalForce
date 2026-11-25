@@ -18,17 +18,19 @@ endpoints must never raise" posture extended to a human-facing page.
 from __future__ import annotations
 
 import os
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse
 from fastapi.templating import Jinja2Templates
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
+from scripts.bk2021.models import SOURCE_TYPE, SignalPayload
 from scripts.measure.recall_report import compute_recall_for_tenant
-from scripts.scoring.engine import score_account, zero_out
+from scripts.scoring.engine import SignalInput, score_account, zero_out
 from scripts.scoring.wiring import load_signal_inputs
 from scripts.storage.models import (
     Account,
@@ -50,9 +52,11 @@ _SIGNAL_TIMELINE_LIMIT = 50
 _RUN_HISTORY_LIMIT = 30
 _HEALTH_TRAILING_DAYS = 14
 
+DashboardInvite = Annotated[InviteIdentity, Depends(require_invite)]
+
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 def _tenant_id(session: Session, invite: InviteIdentity) -> int | None:
@@ -79,16 +83,22 @@ def _load_latest_scores(tenant_id: int, session: Session) -> dict[int, Score]:
 
 
 def _load_recent_signal_types(
-    tenant_id: int, window_start: datetime, session: Session
+    tenant_id: int, window_start: datetime, session: Session, now: datetime
 ) -> dict[int, list[str]]:
     rows = session.execute(
         select(SignalEvent.account_id, SignalEvent.signal_type)
-        .where(SignalEvent.tenant_id == tenant_id, SignalEvent.detected_at >= window_start)
+        .where(
+            SignalEvent.tenant_id == tenant_id,
+            SignalEvent.detected_at >= window_start,
+            SignalEvent.account_id.is_not(None),
+            or_(SignalEvent.signal_type != SOURCE_TYPE, SignalEvent.unexpired_intent(now)),
+        )
         .distinct()
     ).all()
     out: dict[int, list[str]] = {}
     for account_id, signal_type in rows:
-        out.setdefault(account_id, []).append(signal_type)
+        if account_id is not None:
+            out.setdefault(account_id, []).append(signal_type)
     for signal_types in out.values():
         signal_types.sort()
     return out
@@ -108,18 +118,30 @@ def _load_account_rows(tenant_id: int, session: Session) -> list[dict[str, objec
         session.execute(select(Account).where(Account.tenant_id == tenant_id)).scalars().all()
     )
     latest_scores = _load_latest_scores(tenant_id, session)
+    now = _utcnow()
     recent_signals = _load_recent_signal_types(
-        tenant_id, _utcnow() - timedelta(days=_RECENT_SIGNAL_WINDOW_DAYS), session
+        tenant_id, now - timedelta(days=_RECENT_SIGNAL_WINDOW_DAYS), session, now
     )
     last_changed = _load_last_changed(tenant_id, session)
+    tender_accounts = set(
+        session.scalars(
+            select(SignalEvent.account_id)
+            .where(SignalEvent.tenant_id == tenant_id, SignalEvent.signal_type == SOURCE_TYPE)
+            .distinct()
+        )
+    )
 
     rows = []
     for account in accounts:
-        score = latest_scores.get(account.id)
+        latest = latest_scores.get(account.id)
+        score = latest.score if latest is not None else None
+        if account.id in tender_accounts:
+            inputs = _current_signals(tenant_id, account.id, session, now)
+            score = score_account(inputs, now=now).score
         rows.append(
             {
                 "account": account,
-                "score": score.score if score is not None else None,
+                "score": score,
                 "signal_types": recent_signals.get(account.id, []),
                 "last_changed_at": last_changed.get(account.id),
             }
@@ -130,7 +152,7 @@ def _load_account_rows(tenant_id: int, session: Session) -> list[dict[str, objec
 
 
 @router.get("/dashboard", response_class=HTMLResponse)
-def dashboard(request: Request, invite: InviteIdentity = Depends(require_invite)) -> HTMLResponse:
+def dashboard(request: Request, invite: DashboardInvite) -> HTMLResponse:
     # Rendered INSIDE the session block, not after: get_session()'s commit
     # expires every loaded ORM attribute by default (expire_on_commit=True),
     # and Jinja2's TemplateResponse renders synchronously in __init__ -- if
@@ -169,7 +191,11 @@ def _load_account_detail(
     signal_events = (
         session.execute(
             select(SignalEvent)
-            .where(SignalEvent.tenant_id == tenant_id, SignalEvent.account_id == account_id)
+            .where(
+                SignalEvent.tenant_id == tenant_id,
+                SignalEvent.account_id == account_id,
+                SignalEvent.signal_type != SOURCE_TYPE,
+            )
             .order_by(SignalEvent.detected_at.desc())
             .limit(_SIGNAL_TIMELINE_LIMIT)
         )
@@ -187,28 +213,46 @@ def _load_account_detail(
         .all()
     )
 
-    zero_out_rows = _compute_zero_out_table(tenant_id, account_id, session)
+    tenders = [
+        SignalPayload.model_validate(data)
+        for data in session.scalars(
+            select(SignalEvent.payload)
+            .where(
+                SignalEvent.tenant_id == tenant_id,
+                SignalEvent.account_id == account_id,
+                SignalEvent.signal_type == SOURCE_TYPE,
+            )
+            .order_by(SignalEvent.occurred_at.desc(), SignalEvent.id.desc())
+        )
+    ]
+    now = _utcnow()
+    signals = _current_signals(tenant_id, account_id, session, now)
+    current_score = latest_score.score if latest_score is not None else None
+    if tenders:
+        current_score = score_account(signals, now=now).score
+    zero_out_rows = _compute_zero_out_table(signals, now)
 
     return {
         "account": account,
         "score": latest_score,
+        "current_score": current_score,
+        "bk2021_tenders": tenders,
+        "now": now,
         "signal_events": signal_events,
         "sources": sources,
         "zero_out_rows": zero_out_rows,
     }
 
 
-def _compute_zero_out_table(
-    tenant_id: int, account_id: int, session: Session
-) -> list[dict[str, object]]:
-    """One row per distinct signal_type present, showing the account's real
-    score next to its score with that signal_type removed -- Sami's "zero
-    out which signal one by one" (ADR-0015). Reuses scoring/wiring.py's own
-    signal loader (ADR-0018 Decision 3) so this can never silently drift
-    from what run_scoring_stage actually scored."""
-    now = _utcnow()
-    window_start = now - timedelta(days=90)  # matches ADR-0016 Decision 2's scoring window
-    signals = load_signal_inputs(tenant_id, account_id, window_start, session, warned=set())
+def _current_signals(
+    tenant_id: int, account_id: int, session: Session, now: datetime
+) -> list[SignalInput]:
+    window_start = now - timedelta(days=90)  # ADR-0016 Decision 2
+    return load_signal_inputs(tenant_id, account_id, window_start, session, warned=set(), now=now)
+
+
+def _compute_zero_out_table(signals: list[SignalInput], now: datetime) -> list[dict[str, object]]:
+    """Show each signal type's contribution to the account's score."""
     if not signals:
         return []
 
@@ -225,9 +269,7 @@ def _compute_zero_out_table(
 
 
 @router.get("/dashboard/account/{account_id}", response_class=HTMLResponse)
-def account_detail(
-    request: Request, account_id: int, invite: InviteIdentity = Depends(require_invite)
-) -> HTMLResponse:
+def account_detail(request: Request, account_id: int, invite: DashboardInvite) -> HTMLResponse:
     with get_session() as session:
         tenant_id = _tenant_id(session, invite)
         detail = (
@@ -283,7 +325,7 @@ def _load_health_rows(tenant_id: int, session: Session) -> list[dict[str, object
 
 
 @router.get("/dashboard/health", response_class=HTMLResponse)
-def health(request: Request, invite: InviteIdentity = Depends(require_invite)) -> HTMLResponse:
+def health(request: Request, invite: DashboardInvite) -> HTMLResponse:
     with get_session() as session:
         tenant_id = _tenant_id(session, invite)
         if tenant_id is None:
@@ -334,7 +376,7 @@ def _load_runs(tenant_id: int, session: Session) -> list[dict[str, object]]:
 
 
 @router.get("/dashboard/runs", response_class=HTMLResponse)
-def runs(request: Request, invite: InviteIdentity = Depends(require_invite)) -> HTMLResponse:
+def runs(request: Request, invite: DashboardInvite) -> HTMLResponse:
     with get_session() as session:
         tenant_id = _tenant_id(session, invite)
         rows = _load_runs(tenant_id, session) if tenant_id is not None else []

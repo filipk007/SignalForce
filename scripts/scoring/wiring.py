@@ -17,12 +17,13 @@ never a same-run one.
 from __future__ import annotations
 
 import logging
-from datetime import datetime, timedelta, timezone
+from datetime import UTC, datetime, timedelta
 
 from pydantic import BaseModel, ConfigDict
-from sqlalchemy import select
+from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
+from scripts.bk2021.models import SOURCE_TYPE
 from scripts.scoring.engine import SignalInput, score_account
 from scripts.storage.models import Account, Score, SignalEvent
 
@@ -36,6 +37,7 @@ _SIGNAL_WEIGHTS: dict[str, tuple[float, bool]] = {
     "hiring": (0.8, False),
     "funding": (0.7, False),
     "stack_change": (0.6, False),
+    SOURCE_TYPE: (1.0, False),
 }
 _UNKNOWN_SIGNAL_WEIGHT = (0.5, False)
 
@@ -60,9 +62,13 @@ def _weight_for(signal_type: str, *, warned: set[str]) -> tuple[float, bool]:
     return _UNKNOWN_SIGNAL_WEIGHT
 
 
-def _load_account_ids(tenant_id: int, session: Session) -> list[int]:
-    rows = session.execute(select(Account.id).where(Account.tenant_id == tenant_id)).scalars().all()
-    return sorted(rows)
+def _load_account_ids(
+    tenant_id: int, session: Session, account_ids: set[int] | None = None
+) -> list[int]:
+    query = select(Account.id).where(Account.tenant_id == tenant_id)
+    if account_ids is not None:
+        query = query.where(Account.id.in_(account_ids))
+    return list(session.scalars(query.order_by(Account.id)))
 
 
 def load_signal_inputs(
@@ -72,12 +78,17 @@ def load_signal_inputs(
     session: Session,
     *,
     warned: set[str],
+    now: datetime | None = None,
 ) -> list[SignalInput]:
     rows = session.execute(
         select(SignalEvent.signal_type, SignalEvent.detected_at, SignalEvent.confidence).where(
             SignalEvent.tenant_id == tenant_id,
             SignalEvent.account_id == account_id,
             SignalEvent.detected_at >= window_start,
+            or_(
+                SignalEvent.signal_type != SOURCE_TYPE,
+                SignalEvent.unexpired_intent(now or datetime.now(UTC)),
+            ),
         )
     ).all()
     inputs: list[SignalInput] = []
@@ -86,7 +97,7 @@ def load_signal_inputs(
         if detected_at.tzinfo is None:
             # SQLite (tests only -- Postgres always returns tz-aware) drops
             # tzinfo on retrieval even though the column is DateTime(timezone=True).
-            detected_at = detected_at.replace(tzinfo=timezone.utc)
+            detected_at = detected_at.replace(tzinfo=UTC)
         inputs.append(
             SignalInput(
                 signal_type=signal_type,
@@ -104,14 +115,17 @@ def run_scoring_stage(
     now: datetime,
     *,
     window_days: int = _DEFAULT_WINDOW_DAYS,
+    account_ids: set[int] | None = None,
 ) -> ScoringStageReport:
     window_start = now - timedelta(days=window_days)
-    account_ids = _load_account_ids(tenant_id, session)
+    selected_ids = _load_account_ids(tenant_id, session, account_ids)
 
     warned: set[str] = set()
     scores_persisted = 0
-    for account_id in account_ids:
-        signals = load_signal_inputs(tenant_id, account_id, window_start, session, warned=warned)
+    for account_id in selected_ids:
+        signals = load_signal_inputs(
+            tenant_id, account_id, window_start, session, warned=warned, now=now
+        )
         result = score_account(signals, now=now)
         session.add(
             Score(
@@ -124,7 +138,7 @@ def run_scoring_stage(
         )
         scores_persisted += 1
 
-    return ScoringStageReport(accounts_scored=len(account_ids), scores_persisted=scores_persisted)
+    return ScoringStageReport(accounts_scored=len(selected_ids), scores_persisted=scores_persisted)
 
 
 def load_latest_account_score(tenant_id: int, account_id: int, session: Session) -> float:

@@ -27,8 +27,10 @@ dependencies = [
     "signal-audit @ https://github.com/sami2919/signal-audit/archive/refs/tags/v0.2.0.tar.gz",
     "uvicorn[standard]>=0.32",
     "httpx>=0.27",
-    "selectolax>=0.3",
-    "svix>=1.24",
+    # selectolax 1 removes the parser used by the existing watch pipeline.
+    "selectolax==0.4.13",
+    # svix 2 no longer returns the verified JSON from Webhook.verify.
+    "svix==1.99.1",
 ]
 
 [tool.setuptools.packages.find]

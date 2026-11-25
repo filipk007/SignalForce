@@ -2,10 +2,11 @@
 
 from __future__ import annotations
 
-from datetime import date, datetime, timezone
+from datetime import UTC, date, datetime
 
 from sqlalchemy import (
     Boolean,
+    CheckConstraint,
     Date,
     DateTime,
     Float,
@@ -18,6 +19,7 @@ from sqlalchemy import (
 )
 from sqlalchemy.dialects.postgresql import JSONB
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlalchemy.sql.elements import ColumnElement
 from sqlalchemy.types import JSON
 
 # JSONB on Postgres, JSON on SQLite (tests)
@@ -25,7 +27,7 @@ JSONType = JSONB().with_variant(JSON(), "sqlite")
 
 
 def _utcnow() -> datetime:
-    return datetime.now(timezone.utc)
+    return datetime.now(UTC)
 
 
 class Base(DeclarativeBase):
@@ -66,7 +68,7 @@ class Account(Base):
     account_metadata: Mapped[dict] = mapped_column(JSONType, default=dict)
 
     tenant: Mapped[Tenant] = relationship()
-    sources: Mapped[list["AccountSource"]] = relationship(back_populates="account")
+    sources: Mapped[list[AccountSource]] = relationship(back_populates="account")
 
 
 class AccountSource(Base):
@@ -117,7 +119,7 @@ class Probe(Base):
 
     tenant: Mapped[Tenant] = relationship()
     account_source: Mapped[AccountSource] = relationship()
-    scan_run: Mapped["ScanRun"] = relationship(back_populates="probes")
+    scan_run: Mapped[ScanRun] = relationship(back_populates="probes")
 
 
 class HoldoutScan(Base):
@@ -201,20 +203,27 @@ class FactSnapshot(Base):
 
 
 class SignalEvent(Base):
-    """A signal is a DIFF, not a snapshot."""
+    """A detected change or a durable external signal with a lifecycle."""
 
     __tablename__ = "signal_events"
     __table_args__ = (
+        UniqueConstraint("tenant_id", "signal_type", "external_id", name="uq_signal_external"),
+        CheckConstraint(
+            "account_id IS NOT NULL OR external_id IS NOT NULL",
+            name="ck_signal_account_or_external",
+        ),
         Index("ix_signal_events_account", "tenant_id", "account_id", "detected_at"),
         Index("ix_signal_events_type_time", "tenant_id", "signal_type", "detected_at"),
     )
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False)
-    account_id: Mapped[int] = mapped_column(ForeignKey("accounts.id"), nullable=False)
+    account_id: Mapped[int | None] = mapped_column(ForeignKey("accounts.id"), nullable=True)
     account_source_id: Mapped[int | None] = mapped_column(
         ForeignKey("account_sources.id"), nullable=True
     )
     signal_type: Mapped[str] = mapped_column(String(64), nullable=False)
+    external_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
+    intent_until: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
     payload: Mapped[dict] = mapped_column(JSONType, default=dict)
     detected_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
@@ -224,9 +233,38 @@ class SignalEvent(Base):
     scan_run_id: Mapped[int | None] = mapped_column(ForeignKey("scan_runs.id"), nullable=True)
 
     tenant: Mapped[Tenant] = relationship()
-    account: Mapped[Account] = relationship()
+    account: Mapped[Account | None] = relationship()
     account_source: Mapped[AccountSource | None] = relationship()
-    scan_run: Mapped["ScanRun | None"] = relationship(back_populates="signal_events")
+    scan_run: Mapped[ScanRun | None] = relationship(back_populates="signal_events")
+
+    @classmethod
+    def unexpired_intent(cls, now: datetime) -> ColumnElement[bool]:
+        """Only lifecycle-aware signals have an intent deadline."""
+        return cls.intent_until > now
+
+
+class SignalFeed(Base):
+    """Independent scheduling state for one configured tenant feed."""
+
+    __tablename__ = "signal_feeds"
+    __table_args__ = (
+        UniqueConstraint("tenant_id", "source_type", "feed_key", name="uq_signal_feed_key"),
+    )
+    id: Mapped[int] = mapped_column(Integer, primary_key=True)
+    tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    source_type: Mapped[str] = mapped_column(String(32), nullable=False)
+    feed_key: Mapped[str] = mapped_column(String(64), nullable=False)
+    last_success: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+
+
+class BK2021FeedMember(Base):
+    """Keep feed refresh membership separate from an announcement's stable identity."""
+
+    __tablename__ = "bk2021_feed_members"
+    __table_args__ = (Index("ix_signal_feed_member_event", "signal_event_id"),)
+    feed_id: Mapped[int] = mapped_column(ForeignKey("signal_feeds.id"), primary_key=True)
+    signal_event_id: Mapped[int] = mapped_column(ForeignKey("signal_events.id"), primary_key=True)
+    min_capacity_kwh: Mapped[int] = mapped_column(Integer, nullable=False)
 
 
 class Score(Base):
@@ -280,6 +318,7 @@ class ScanRun(Base):
     __tablename__ = "scan_runs"
     id: Mapped[int] = mapped_column(Integer, primary_key=True)
     tenant_id: Mapped[int] = mapped_column(ForeignKey("tenants.id"), nullable=False)
+    feed_key: Mapped[str | None] = mapped_column(String(64), nullable=True)
     started_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True), nullable=False, default=_utcnow
     )
