@@ -1,0 +1,24 @@
+{% set signal = row.signal %}
+<article>
+  <h3><a class="row-link" href="{{ signal.url }}">{{ signal.title or signal.native_id }}</a></h3>
+  <p>
+    <span class="chip">{{ row.state }}</span>
+    <span class="chip">{{ signal.signal_type }}</span>
+    {% if row.account_id %}<a href="/dashboard/account/{{ row.account_id }}">{{ signal.company_name or "account" }}</a>{% else %}{{ signal.company_name or "company not established" }}{% endif %}
+    <span class="muted">· role {{ signal.company_role }}{% if signal.company_ref %} · registry ID {{ signal.company_ref }}{% endif %}</span>
+  </p>
+  <p class="muted">
+    {% if signal.occurred_on %}Decision {{ signal.occurred_on }} · {% endif %}
+    {% if signal.published_on %}Published {{ signal.published_on }} · {% endif %}
+    {% if signal.updated_on and signal.updated_on != signal.published_on %}Updated {{ signal.updated_on }} · {% endif %}
+    {% if signal.source_updated_at %}Source file {{ signal.source_updated_at.strftime("%Y-%m-%d %H:%M UTC") }} · {% endif %}
+    {% if signal.deadline %}Deadline {{ signal.deadline.strftime("%Y-%m-%d %H:%M %z") }} · {% elif signal.expires_at %}Proposed expiry {{ signal.expires_at.strftime("%Y-%m-%d") }} · {% else %}No deadline · {% endif %}
+    First read {{ signal.observed_at.strftime("%Y-%m-%d %H:%M UTC") }}
+  </p>
+  <p class="muted">{{ signal.source_instance_id }} via {{ signal.transport }} · {{ signal.native_id }} · {{ signal.rule_version }}</p>
+  {% if row.reasons %}<p class="badge-warn">{{ row.reasons|join(" · ") }}</p>{% endif %}
+  {% for item in signal.evidence %}
+  <blockquote>{{ item.excerpt }}<br><span class="muted"><a href="{{ item.url }}">evidence</a> · {{ item.locator }} · version {{ item.version }}</span></blockquote>
+  {% endfor %}
+  {% if signal.mapping_evidence_url %}<p class="muted"><a href="{{ signal.mapping_evidence_url }}">company domain evidence</a>{% if signal.decision_evidence_url %} · <a href="{{ signal.decision_evidence_url }}">decision check</a>{% endif %}</p>{% endif %}
+</article>

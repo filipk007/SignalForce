@@ -27,7 +27,7 @@ _COLUMNS = (
 )
 
 
-def _safe_cell(value: str) -> str:
+def safe_cell(value: str) -> str:
     # Spreadsheet clients may treat quotes from the announcement as formulas.
     return "'" + value if value.lstrip().startswith(("=", "+", "-", "@")) else value
 
@@ -65,14 +65,14 @@ def export_csv(
             writer.writerow(
                 (
                     domain,
-                    _safe_cell(payload.buyer),
+                    safe_cell(payload.buyer),
                     payload.nip,
                     SOURCE_TYPE,
                     payload.source_id,
                     payload.first_published.isoformat(),
                     payload.url,
                     payload.deadline.isoformat() if payload.deadline else "",
-                    _safe_cell(" ".join(payload.evidence)),
+                    safe_cell(" ".join(payload.evidence)),
                 )
             )
     return output.getvalue()

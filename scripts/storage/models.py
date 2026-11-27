@@ -26,6 +26,10 @@ from sqlalchemy.types import JSON
 JSONType = JSONB().with_variant(JSON(), "sqlite")
 
 
+# Signal types that count as current only while their stored intent deadline is ahead.
+LIFECYCLE_TYPES = ("bk2021", "ted_road_transport", "rwdz_plant_expansion")
+
+
 def _utcnow() -> datetime:
     return datetime.now(UTC)
 
@@ -255,6 +259,8 @@ class SignalFeed(Base):
     source_type: Mapped[str] = mapped_column(String(32), nullable=False)
     feed_key: Mapped[str] = mapped_column(String(64), nullable=False)
     last_success: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+    # Publication schedule, import interval and the source cursor of the last success.
+    meta: Mapped[dict | None] = mapped_column(JSONType, nullable=True)
 
 
 class BK2021FeedMember(Base):

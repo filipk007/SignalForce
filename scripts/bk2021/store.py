@@ -75,14 +75,19 @@ def account_id_for(
 ) -> int | None:
     if binding is None:
         return None
-    lookup = select(Account.id).where(Account.tenant_id == tenant, Account.domain == binding.domain)
+    return ensure_account(session, tenant, binding.domain, payload.buyer)
+
+
+def ensure_account(session: Session, tenant: int, domain: str, name: str) -> int:
+    """Find or create the tenant's account for an operator-verified domain."""
+    lookup = select(Account.id).where(Account.tenant_id == tenant, Account.domain == domain)
     account_id = session.scalar(lookup)
     if account_id is not None:
         return account_id
     try:
         # The career registry can create this domain concurrently.
         with session.begin_nested():
-            account = Account(tenant_id=tenant, domain=binding.domain, name=payload.buyer[:255])
+            account = Account(tenant_id=tenant, domain=domain, name=name[:255])
             session.add(account)
             session.flush()
     except IntegrityError:

@@ -23,9 +23,8 @@ from pydantic import BaseModel, ConfigDict
 from sqlalchemy import or_, select
 from sqlalchemy.orm import Session
 
-from scripts.bk2021.models import SOURCE_TYPE
 from scripts.scoring.engine import SignalInput, score_account
-from scripts.storage.models import Account, Score, SignalEvent
+from scripts.storage.models import LIFECYCLE_TYPES, Account, Score, SignalEvent
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,10 @@ _SIGNAL_WEIGHTS: dict[str, tuple[float, bool]] = {
     "hiring": (0.8, False),
     "funding": (0.7, False),
     "stack_change": (0.6, False),
-    SOURCE_TYPE: (1.0, False),
+    "bk2021": (1.0, False),
+    "ted_road_transport": (1.0, False),
+    # A permit decision shows investment, not a specific purchase.
+    "rwdz_plant_expansion": (0.6, False),
 }
 _UNKNOWN_SIGNAL_WEIGHT = (0.5, False)
 
@@ -86,7 +88,7 @@ def load_signal_inputs(
             SignalEvent.account_id == account_id,
             SignalEvent.detected_at >= window_start,
             or_(
-                SignalEvent.signal_type != SOURCE_TYPE,
+                SignalEvent.signal_type.not_in(LIFECYCLE_TYPES),
                 SignalEvent.unexpired_intent(now or datetime.now(UTC)),
             ),
         )

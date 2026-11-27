@@ -26,6 +26,10 @@
     section { margin-bottom: 2rem; }
     .badge-ok { color: #3fb950; }
     .badge-warn { color: #d29922; }
+    article { border-top: 1px solid #30363d; padding-top: 0.25rem; overflow-wrap: anywhere; }
+    blockquote { margin: 0 0 1rem; padding-left: 0.75rem; border-left: 2px solid #30363d; }
+    a { color: #58a6ff; }
+    @media (max-width: 600px) { nav { flex-wrap: wrap; gap: 0.75rem; padding: 1rem; } main { padding: 1rem; } }
   </style>
 </head>
 <body>
@@ -33,6 +37,7 @@
     <a href="/audit" class="{% block nav_audit %}{% endblock %}">Audit</a>
     <a href="/watchlist" class="{% block nav_watchlist %}{% endblock %}">Watchlist</a>
     <a href="/dashboard" class="{% block nav_accounts %}{% endblock %}">Accounts</a>
+    <a href="/dashboard/signals" class="{% block nav_signals %}{% endblock %}">Signals</a>
     <a href="/dashboard/health" class="{% block nav_health %}{% endblock %}">Health</a>
     <a href="/dashboard/runs" class="{% block nav_runs %}{% endblock %}">Runs</a>
     {% if request.session.get("invite_id") %}

@@ -10,8 +10,8 @@
     <span class="value">{{ "%.1f"|format(current_score) if current_score is not none else "—" }}</span>
     <span class="label">Current score</span>
   </div>
-  {% if bk2021_tenders %}
-    <p class="muted">Recalculated on page load using current tender intent.
+  {% if bk2021_tenders or external_signals %}
+    <p class="muted">Recalculated on page load using current intent.
       {% if score %}Last saved score {{ "%.1f"|format(score.score) }} · {{ score.computed_at.strftime("%Y-%m-%d %H:%M") }} UTC.{% endif %}
     </p>
   {% elif score %}
@@ -45,6 +45,13 @@
 </section>
 {% endif %}
 
+{% if external_signals %}
+<section>
+  <h2>TED and RWDZ signals</h2>
+  {% for row in external_signals %}{% include "_external_signal.html" %}{% endfor %}
+</section>
+{% endif %}
+
 <section>
   <h2>Zero-out analysis</h2>
   {% if not zero_out_rows %}
@@ -68,7 +75,7 @@
   {% endif %}
 </section>
 
-{% if signal_events or not bk2021_tenders %}
+{% if signal_events or not (bk2021_tenders or external_signals) %}
 <section>
   <h2>Signal timeline</h2>
   {% if not signal_events %}

@@ -1,0 +1,34 @@
+{% extends "base.html" %}
+{% block title %}Signals — SignalForce{% endblock %}
+{% block nav_signals %}active{% endblock %}
+{% block content %}
+<h1>Signals</h1>
+<section>
+  <h2>Sources</h2>
+  {% if not sources %}
+    <p class="empty">No source has run yet.</p>
+  {% else %}
+  {% for source in sources %}
+  <article>
+    <p><strong>{{ source.key }}</strong>
+      {% if source.run %}<span class="{{ 'badge-ok' if source.run.status == 'completed' else 'badge-warn' }}">{{ source.run.status }}</span>{% endif %}
+    </p>
+    <p class="muted">Publisher releases: {{ source.meta.publisher_schedule or "—" }}<br>
+      Import: {{ "every %s h"|format(source.meta.interval_hours) if source.meta.interval_hours else "—" }}
+      · Last success: {{ source.feed.last_success.strftime("%Y-%m-%d %H:%M UTC") if source.feed.last_success else "never" }}<br>
+      Last attempt: {{ (source.run.error or source.meta.note or source.run.status) if source.run else "—" }}</p>
+  </article>
+  {% endfor %}
+  {% endif %}
+</section>
+<section>
+  <h2>TED and RWDZ entries</h2>
+  <p>
+    {% for value, label in [("all", "All history"), ("active", "Active"), ("review", "Review queue")] %}
+    <a class="chip" href="/dashboard/signals?show={{ value }}">{{ "● " if show == value }}{{ label }}</a>
+    {% endfor %}
+  </p>
+  {% if not rows %}<p class="empty">Nothing here.</p>{% endif %}
+  {% for row in rows %}{% include "_external_signal.html" %}{% endfor %}
+</section>
+{% endblock %}
