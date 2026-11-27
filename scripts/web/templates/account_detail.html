@@ -7,13 +7,50 @@
 
 <section>
   <div class="metric">
-    <span class="value">{{ "%.1f"|format(score.score) if score else "—" }}</span>
+    <span class="value">{{ "%.1f"|format(current_score) if current_score is not none else "—" }}</span>
     <span class="label">Current score</span>
   </div>
-  {% if score %}
+  {% if bk2021_tenders or external_signals %}
+    <p class="muted">Recalculated on page load using current intent.
+      {% if score %}Last saved score {{ "%.1f"|format(score.score) }} · {{ score.computed_at.strftime("%Y-%m-%d %H:%M") }} UTC.{% endif %}
+    </p>
+  {% elif score %}
     <p class="muted">Computed {{ score.computed_at.strftime("%Y-%m-%d %H:%M") }}</p>
   {% endif %}
 </section>
+
+{% if bk2021_tenders %}
+<section>
+  <h2>BK2021 tenders</h2>
+  {% for tender in bk2021_tenders %}
+  {% set state = tender.intent_status(now) %}
+  <article>
+    <h3><a class="row-link" href="{{ tender.url }}">{{ tender.title or ('BK2021 ' ~ tender.source_id) }}</a></h3>
+    <p>
+      <span class="chip">{{ state }}</span>
+      <span class="muted">{{ tender.status }} · Announcement {{ tender.source_id }} · Version {{ tender.version_id }}</span>
+    </p>
+    <p class="muted">
+      First published {{ tender.first_published.strftime("%Y-%m-%d") }}
+      · Deadline {{ tender.warsaw_deadline.strftime("%Y-%m-%d %H:%M:%S %Z") if tender.warsaw_deadline else "—" }}
+    </p>
+    {% if tender.evidence_version_id != tender.version_id %}
+    <p class="muted">Evidence from version {{ tender.evidence_version_id }}</p>
+    {% endif %}
+    {% for quote in tender.evidence %}
+    <blockquote>{{ quote }}</blockquote>
+    {% endfor %}
+  </article>
+  {% endfor %}
+</section>
+{% endif %}
+
+{% if external_signals %}
+<section>
+  <h2>TED and RWDZ signals</h2>
+  {% for row in external_signals %}{% include "_external_signal.html" %}{% endfor %}
+</section>
+{% endif %}
 
 <section>
   <h2>Zero-out analysis</h2>
@@ -38,6 +75,7 @@
   {% endif %}
 </section>
 
+{% if signal_events or not (bk2021_tenders or external_signals) %}
 <section>
   <h2>Signal timeline</h2>
   {% if not signal_events %}
@@ -57,6 +95,7 @@
   </table>
   {% endif %}
 </section>
+{% endif %}
 
 <section>
   <h2>Source registry</h2>

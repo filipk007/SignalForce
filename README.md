@@ -226,6 +226,8 @@ def scan(config: ScannerConfig) -> ScanResult:
 
 ## Docs
 
+- [BK2021 industrial battery tenders](examples/bk2021/README.md) for tenant feeds, dashboard evidence and an active-company CSV
+- [Polish TED road-transport tenders and RWDZ permit pilot](examples/pl-intake/README.md) for two sources in one panel and CSV
 - [`docs/user-guide.md`](docs/user-guide.md) and [`docs/setup-guide.md`](docs/setup-guide.md): setup and day-to-day use
 - [`docs/architecture.md`](docs/architecture.md): how the layers fit together
 - [`docs/n8n-setup-guide.md`](docs/n8n-setup-guide.md): autonomous operation

@@ -179,7 +179,7 @@ async def _decoded_chunks(streamed: httpx.Response, max_bytes: int) -> AsyncIter
 
 
 async def get_capped(
-    client: httpx.AsyncClient, url: str, *, max_bytes: int, **kwargs
+    client: httpx.AsyncClient, url: str, *, max_bytes: int, method: str = "GET", **kwargs
 ) -> httpx.Response:
     """GET `url` with the DECODED body bounded at `max_bytes` while it streams.
 
@@ -189,7 +189,7 @@ async def get_capped(
     through the client's request hooks (the guard). Raises BodyTooLarge as soon
     as the body passes the cap, without reading the rest.
     """
-    async with client.stream("GET", url, **kwargs) as streamed:
+    async with client.stream(method, url, **kwargs) as streamed:
         parts: list[bytes] = []
         seen = 0
         async for chunk in _decoded_chunks(streamed, max_bytes):

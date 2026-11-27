@@ -17,7 +17,7 @@
     {% for row in rows %}
     <tr>
       <td class="muted">{{ row.run.started_at.strftime("%Y-%m-%d %H:%M") if row.run.started_at else "—" }}</td>
-      <td class="{{ 'badge-ok' if row.run.status == 'completed' else 'badge-warn' }}">{{ row.run.status }}</td>
+      <td class="{{ 'badge-ok' if row.run.status == 'completed' else 'badge-warn' }}">{{ row.run.status }}{% if row.run.feed_key %} · {% if ":" not in row.run.feed_key %}BK2021 / {% endif %}{{ row.run.feed_key }}{% endif %}</td>
       <td>{{ "%.1fs"|format(row.duration_s) if row.duration_s is not none else "—" }}</td>
       <td>{{ row.run.sources_probed }}</td>
       <td>{{ "%.0f%%"|format(row.change_rate * 100) if row.change_rate is not none else "—" }}</td>

@@ -1,0 +1,28 @@
+tenant: pl-pilot
+ted:
+  instance: ted-pl
+  publisher_schedule: TED w dni robocze; hostowane NicheDB eu-tenders co 4 h, do 250 ogłoszeń UE na przebieg
+  interval_hours: 4
+  lookback_days: 3
+  overlap_hours: 24
+  max_notices: 200
+  # Zweryfikowana próbka. Pobierana także wtedy, gdy NicheDB jej nie wskaże.
+  publications: ["811160-2026"]
+rwdz:
+  instance: rwdz-wlkp
+  publisher_schedule: GUNB co noc
+  interval_hours: 24
+  lookback_days: 30
+  intent_days: 90
+companies:
+  # REGON i adres www zamawiającego z oryginału ogłoszenia TED.
+  - registry_id: "012199305"
+    domain: rars.gov.pl
+    evidence_url: https://ted.europa.eu/en/notice/811160-2026/xml
+decisions: []
+# RWDZ: dodaj wpis po sprawdzeniu sprawy w wyszukiwarce GUNB i tożsamości inwestora.
+#   - case: "<numer_urzad>/<numer_gunb>"      # pole "case" z polecenia status
+#     decision: positive                        # albo negative
+#     decision_evidence_url: https://wyszukiwarka.gunb.gov.pl/
+#     domain: przyklad.example
+#     domain_evidence_url: https://przyklad.example/o-firmie
